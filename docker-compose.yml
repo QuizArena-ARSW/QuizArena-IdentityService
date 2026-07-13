@@ -1,0 +1,19 @@
+# ==========================================================
+# QuizArena - Servicio de Identidad - Entorno local
+# Levanta la base de datos con: docker compose up -d
+# ==========================================================
+services:
+  postgres-identidad:
+    image: postgres:16
+    container_name: quizarena-postgres-identidad
+    environment:
+      POSTGRES_DB: identidad_db
+      POSTGRES_USER: quizarena
+      POSTGRES_PASSWORD: quizarena123
+    ports:
+      - "5433:5432"          # 5433 en el host para no chocar con el de Juego (5432)
+    volumes:
+      - postgres_identidad_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_identidad_data:
