@@ -1,8 +1,10 @@
 # QuizArena · Servicio de Identidad y Contenido
 
-Microservicio que maneja cuentas (registro/login con **JWT**), **bancos de
-preguntas** e **historial** de partidas. A diferencia del Servicio de Juego,
-este es un backend REST clásico con **JPA + PostgreSQL + Spring Security**.
+Microservicio que maneja cuentas (registro/login con **JWT** y verificación
+de correo), **bancos de preguntas**, **historial** de partidas y el
+**sistema de amigos** (solicitudes, aceptación, listado). Backend REST
+clásico con **JPA + PostgreSQL + Spring Security**, corre en una sola
+instancia (no usa Redis, a diferencia del Servicio de Juego).
 
 ---
 
@@ -11,7 +13,9 @@ este es un backend REST clásico con **JPA + PostgreSQL + Spring Security**.
 - **Java 17** o superior
 - **Maven**
 - **Docker Desktop** (para PostgreSQL)
-- **IntelliJ IDEA** (recomendado)
+- Una cuenta de correo SMTP para enviar los códigos de verificación (en
+  desarrollo se puede dejar vacío y el envío simplemente falla sin romper
+  el registro; ver `ServicioCorreo`)
 
 ---
 
@@ -25,7 +29,7 @@ este es un backend REST clásico con **JPA + PostgreSQL + Spring Security**.
 
    Usa el puerto **5433** en tu máquina (para no chocar con el PostgreSQL del
    Servicio de Juego, que usa el 5432). Las tablas se crean solas al arrancar
-   (gracias a `spring.jpa.hibernate.ddl-auto=update`).
+   (`spring.jpa.hibernate.ddl-auto=update`).
 
 2. **Arranca el servicio** (desde IntelliJ ejecuta `ServicioIdentidadApplication`,
    o por terminal):
@@ -42,25 +46,41 @@ este es un backend REST clásico con **JPA + PostgreSQL + Spring Security**.
 
 ### 1. Registrarse
 
+La contraseña debe tener mínimo 6 caracteres e incluir al menos **un
+carácter especial**.
+
 ```bash
 curl -X POST http://localhost:8082/api/auth/registro \
   -H "Content-Type: application/json" \
-  -d '{"correo":"juan@mail.com","contrasena":"secreta123","nombre":"Juan"}'
+  -d '{"correo":"juan@mail.com","contrasena":"secreta123!","nombre":"Juan"}'
 ```
 
-Respuesta: un **token JWT**. Cópialo, lo necesitas para los siguientes pasos.
+Respuesta: un mensaje indicando que se envió un código de verificación al
+correo. Sin verificar el correo, el login no funciona.
 
-### 2. Iniciar sesión (alternativa, devuelve otro token válido)
+### 2. Verificar el correo
+
+```bash
+curl -X POST http://localhost:8082/api/auth/verificar \
+  -H "Content-Type: application/json" \
+  -d '{"correo":"juan@mail.com","codigo":"123456"}'
+```
+
+Respuesta: un **token JWT**.
+
+### 3. Iniciar sesión (alternativa, ya con el correo verificado)
 
 ```bash
 curl -X POST http://localhost:8082/api/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"correo":"juan@mail.com","contrasena":"secreta123"}'
+  -d '{"correo":"juan@mail.com","contrasena":"secreta123!"}'
 ```
 
-### 3. Crear un banco (requiere token)
+> Tras **5 intentos fallidos en 10 minutos**, el correo queda bloqueado por
+> 5 minutos (`LimitadorIntentosLogin`) — protección básica contra fuerza
+> bruta.
 
-Reemplaza `TU_TOKEN` por el token del paso anterior:
+### 4. Crear un banco (requiere token)
 
 ```bash
 curl -X POST http://localhost:8082/api/bancos \
@@ -69,32 +89,14 @@ curl -X POST http://localhost:8082/api/bancos \
   -d '{"nombre":"Parcial 1","materia":"Arquitectura"}'
 ```
 
-Respuesta: el banco creado, con su `id`.
-
-### 4. Agregar una pregunta al banco
-
-Reemplaza `ID_BANCO` por el id del paso anterior:
+### 5. Buscar amigos y enviar una solicitud
 
 ```bash
-curl -X POST http://localhost:8082/api/bancos/ID_BANCO/preguntas \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer TU_TOKEN" \
-  -d '{
-    "enunciado":"¿Que patron usa QuizArena?",
-    "tipo":"OPCION_MULTIPLE",
-    "tiempoLimiteSegundos":20,
-    "opciones":[
-      {"texto":"Monolito","esCorrecta":false},
-      {"texto":"Microservicios","esCorrecta":true}
-    ]
-  }'
-```
+curl "http://localhost:8082/api/amigos/buscar?q=juan" -H "Authorization: Bearer TU_TOKEN"
 
-### 5. Buscar bancos por materia
-
-```bash
-curl "http://localhost:8082/api/bancos?materia=Arquitectura" \
-  -H "Authorization: Bearer TU_TOKEN"
+curl -X POST http://localhost:8082/api/amigos/solicitudes \
+  -H "Content-Type: application/json" -H "Authorization: Bearer TU_TOKEN" \
+  -d '{"idDestinatario":"ID_DEL_OTRO_USUARIO"}'
 ```
 
 ---
@@ -105,34 +107,49 @@ curl "http://localhost:8082/api/bancos?materia=Arquitectura" \
 src/main/java/com/quizarena/identidad/
 ├── ServicioIdentidadApplication.java
 ├── config/
-│   └── SecurityConfig.java         # que endpoints son publicos / protegidos
+│   └── SecurityConfig.java          # que endpoints son publicos / protegidos
 ├── seguridad/
-│   ├── ProveedorJwt.java           # genera y valida los tokens JWT
-│   └── FiltroJwt.java              # valida el token en cada peticion
-├── modelo/                         # entidades JPA (tablas)
+│   ├── ProveedorJwt.java            # genera y valida los tokens JWT
+│   ├── FiltroJwt.java               # valida el token en cada peticion (obligatorio)
+│   └── LimitadorIntentosLogin.java  # bloqueo temporal tras fuerza bruta (en memoria)
+├── modelo/                          # entidades JPA (tablas)
 │   ├── Usuario, BancoPreguntas, PreguntaBanco, OpcionBanco, RegistroPartida
+│   ├── SolicitudAmistad, EstadoSolicitud
 │   └── Rol, TipoPregunta (enums)
-├── repositorio/                    # interfaces Spring Data (acceso a datos)
-├── dto/                            # objetos de entrada/salida de la API
-├── servicio/                       # logica de negocio
+├── repositorio/                     # interfaces Spring Data (acceso a datos)
+├── dto/                             # objetos de entrada/salida de la API
+├── servicio/                        # logica de negocio
 │   ├── ServicioAutenticacion, ServicioBancos, ServicioHistorial
-└── controlador/                    # endpoints REST
-    ├── AuthController, BancoController, HistorialController
+│   ├── ServicioAmigos                    # solicitudes, aceptar/rechazar, listar amigos
+│   └── ServicioCorreo                    # envio de codigos de verificacion
+└── controlador/                     # endpoints REST
+    ├── AuthController, BancoController, HistorialController, AmigoController
+    └── ManejadorErroresValidacion        # traduce errores de @Valid a {"error": "..."}
 ```
 
 ## Seguridad, en resumen
 
-- `/api/auth/**` (registro, login) son **públicos**.
+- `/api/auth/**` (registro, login, verificación) son **públicos**.
 - `POST /api/historial` está **abierto** para la comunicación interna del
-  Servicio de Juego en desarrollo (en producción se aseguraría servicio-a-servicio).
+  Servicio de Juego en desarrollo.
 - **Todo lo demás requiere** la cabecera `Authorization: Bearer <token>`.
-- Las contraseñas se guardan **hasheadas con BCrypt**, nunca en texto plano.
+- Contraseñas hasheadas con **BCrypt**; nunca en texto plano.
+- Registro exige contraseña con al menos un carácter especial.
+- Login bloquea un correo temporalmente tras varios intentos fallidos
+  seguidos (fuerza bruta).
+- `quizarena.jwt.secret` **no tiene valor por defecto**: si falta la
+  variable de entorno `JWT_SECRET`, el servicio no arranca — evita firmar
+  tokens con una clave pública conocida del repositorio. Debe ser
+  **idéntica** a la del API Gateway y el Servicio de Juego.
 
----
+## Cómo se conecta con los demás servicios
 
-## Cómo se conecta con el Servicio de Juego (Fase 2)
-
-- El Servicio de Juego pedirá los bancos reales a `GET /api/bancos/{id}` en lugar
-  de usar preguntas quemadas.
-- Al terminar una partida, el Servicio de Juego llamará a `POST /api/historial`
-  para guardar el resultado de cada jugador.
+- El Servicio de Juego pide los bancos reales a `GET /api/bancos/{id}` y
+  guarda resultados con `POST /api/historial`.
+- El Servicio de Juego también valida el mismo JWT (de forma permisiva) para
+  saber quién crea una sala y así poder invitar amigos vía
+  `/api/amigos/**`.
+- El Servicio de IA no llama a Identidad directamente: el frontend recibe
+  los borradores generados y, si el usuario los aprueba, los guarda con el
+  mismo endpoint `POST /api/bancos/{id}/preguntas` que usa la creación
+  manual.

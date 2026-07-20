@@ -3,6 +3,8 @@ package com.quizarena.identidad.servicio;
 import com.quizarena.identidad.dto.PreguntaRequest;
 import com.quizarena.identidad.modelo.*;
 import com.quizarena.identidad.repositorio.BancoRepository;
+import com.quizarena.identidad.repositorio.UsuarioRepository;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,9 +15,14 @@ import java.util.UUID;
 public class ServicioBancos {
 
     private final BancoRepository bancoRepository;
+    private final UsuarioRepository usuarioRepository;
+    private final String correoOficial;
 
-    public ServicioBancos(BancoRepository bancoRepository) {
+    public ServicioBancos(BancoRepository bancoRepository, UsuarioRepository usuarioRepository,
+                          @Value("${quizarena.bancos.correo-oficial:oficial@quizarena.com}") String correoOficial) {
         this.bancoRepository = bancoRepository;
+        this.usuarioRepository = usuarioRepository;
+        this.correoOficial = correoOficial;
     }
 
     public BancoPreguntas crearBanco(String nombre, String materia, UUID idAutor) {
@@ -45,8 +52,20 @@ public class ServicioBancos {
         return bancoRepository.findByMateriaContainingIgnoreCase(materia);
     }
 
+    /** Bancos creados por un usuario ("mis bancos"). */
+    public List<BancoPreguntas> buscarPorAutor(UUID idAutor) {
+        return bancoRepository.findByIdAutor(idAutor);
+    }
+
     public BancoPreguntas obtenerBanco(UUID idBanco) {
         return bancoRepository.findById(idBanco)
                 .orElseThrow(() -> new IllegalArgumentException("Banco no encontrado"));
+    }
+
+    /** Bancos predeterminados de QuizArena (los creados por la cuenta oficial). */
+    public List<BancoPreguntas> bancosOficiales() {
+        return usuarioRepository.findByCorreo(correoOficial)
+                .map(u -> bancoRepository.findByIdAutor(u.getId()))
+                .orElse(List.of());
     }
 }

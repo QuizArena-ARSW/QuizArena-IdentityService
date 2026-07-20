@@ -30,6 +30,15 @@ public class Usuario {
     @Column(nullable = false)
     private LocalDateTime fechaRegistro;
 
+    // Boolean (no boolean primitivo) para que usuarios preexistentes con la
+    // columna en NULL (agregada via ddl-auto=update, sin backfill) no rompan el mapeo.
+    private Boolean verificado = false;
+
+    @Column(length = 6)
+    private String codigoVerificacion;
+
+    private LocalDateTime codigoVerificacionExpira;
+
     protected Usuario() { } // requerido por JPA
 
     public Usuario(String correo, String hashContrasena, String nombre, Rol rol) {
@@ -44,12 +53,33 @@ public class Usuario {
         return rol == Rol.DOCENTE;
     }
 
+    /** Asigna un nuevo codigo de verificacion con vencimiento. */
+    public void asignarCodigoVerificacion(String codigo, LocalDateTime expira) {
+        this.codigoVerificacion = codigo;
+        this.codigoVerificacionExpira = expira;
+    }
+
+    /** Valida el codigo recibido contra el asignado y su vencimiento, sin revelar cual fallo. */
+    public boolean codigoValido(String codigo) {
+        return codigoVerificacion != null
+                && codigoVerificacion.equals(codigo)
+                && codigoVerificacionExpira != null
+                && codigoVerificacionExpira.isAfter(LocalDateTime.now());
+    }
+
+    public void marcarVerificado() {
+        this.verificado = true;
+        this.codigoVerificacion = null;
+        this.codigoVerificacionExpira = null;
+    }
+
     public UUID getId() { return id; }
     public String getCorreo() { return correo; }
     public String getHashContrasena() { return hashContrasena; }
     public String getNombre() { return nombre; }
     public Rol getRol() { return rol; }
     public LocalDateTime getFechaRegistro() { return fechaRegistro; }
+    public boolean isVerificado() { return Boolean.TRUE.equals(verificado); }
 
     public void setHashContrasena(String hashContrasena) { this.hashContrasena = hashContrasena; }
 }
