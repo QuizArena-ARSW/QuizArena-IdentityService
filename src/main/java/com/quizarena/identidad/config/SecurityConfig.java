@@ -32,6 +32,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
+                // CSRF protege sesiones basadas en cookies, donde el navegador adjunta
+                // credenciales automaticamente en cualquier peticion cross-site. Esta
+                // API es STATELESS y se autentica con "Authorization: Bearer <jwt>"
+                // (nunca con cookies), cabecera que un sitio malicioso no puede forzar
+                // a adjuntar: por eso CSRF no aplica aqui y desactivarlo es lo correcto,
+                // no un descuido (SonarCloud java:S4502 marca esto para revision manual).
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth
                         // Publicos: registro y login
